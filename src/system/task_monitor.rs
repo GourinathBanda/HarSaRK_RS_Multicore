@@ -1,6 +1,6 @@
 use crate::config::MAX_TASKS;
-use crate::system::scheduler::TaskId;
 use crate::kernel::logging;
+use crate::system::scheduler::TaskId;
 use crate::system::system_logger::LogEventType;
 
 pub struct TaskMonitor {
@@ -9,7 +9,7 @@ pub struct TaskMonitor {
 }
 
 impl TaskMonitor {
-    pub const fn new() -> Self{
+    pub const fn new() -> Self {
         Self {
             active_deadlines: [None; MAX_TASKS],
             handler: None,

@@ -1,6 +1,5 @@
 //! Macro Definitions
 
-
 /// The tasks must be looping infinitely and call `task_exit` whenever a particular task is done.
 /// This makes it complicated to create tasks and also might introduce undefined behavior if task_exit is not called.
 /// The `spawn` macro makes it easier to define tasks. It also defines a static variable of type TaskId,

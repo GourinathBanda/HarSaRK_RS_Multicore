@@ -1,16 +1,13 @@
 //! # Software synchronization bus definition
 //!
-use core::cell::RefCell;
-use crate::system::scheduler::BooleanVector;
-use crate::KernelError;
 use crate::kernel::tasks::{get_curr_tid, release, schedule};
+use crate::system::scheduler::BooleanVector;
 use crate::utils::arch::critical_section;
+use crate::KernelError;
+use core::cell::RefCell;
 
 #[cfg(feature = "system_logger")]
-use {
-    crate::system::system_logger::LogEventType,
-    crate::kernel::logging,
-};
+use {crate::kernel::logging, crate::system::system_logger::LogEventType};
 
 /// Enables task synchronization and communication.
 pub struct Semaphore {
@@ -23,7 +20,10 @@ pub struct Semaphore {
 impl Semaphore {
     /// Initializes a new semaphore instance.
     pub const fn new(tasks: BooleanVector) -> Self {
-        Self { flags: RefCell::new(0), tasks }
+        Self {
+            flags: RefCell::new(0),
+            tasks,
+        }
     }
 
     /// Signals the semaphore, all tasks specified in semaphore::flags can test for it and all tasks in semaphore::tasks are released
@@ -32,7 +32,8 @@ impl Semaphore {
             let flags: &mut BooleanVector = &mut self.flags.borrow_mut();
             *flags |= tasks_mask;
             release(self.tasks);
-            #[cfg(feature = "system_logger")] {
+            #[cfg(feature = "system_logger")]
+            {
                 if logging::get_semaphore_signal() {
                     logging::report(LogEventType::SemaphoreSignal(*flags, self.tasks));
                 }
@@ -49,7 +50,8 @@ impl Semaphore {
             let flags: &mut BooleanVector = &mut self.flags.borrow_mut();
             if *flags & curr_tid_mask == curr_tid_mask {
                 *flags &= !curr_tid_mask;
-                #[cfg(feature = "system_logger")] {
+                #[cfg(feature = "system_logger")]
+                {
                     if logging::get_semaphore_reset() {
                         logging::report(LogEventType::SemaphoreReset(curr_tid));
                     }
@@ -58,8 +60,8 @@ impl Semaphore {
             } else {
                 return Ok(false);
             }
-    })
-}
+        })
+    }
 }
 
 unsafe impl Sync for Semaphore {}

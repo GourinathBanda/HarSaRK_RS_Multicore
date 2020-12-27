@@ -4,13 +4,13 @@
 
 use core::cell::RefCell;
 
-use crate::utils::arch::{critical_section,Mutex};
+use crate::utils::arch::{critical_section, Mutex};
 
+use crate::kernel::timer::get_time;
 use crate::priv_execute;
 use crate::system::event::*;
 use crate::utils::arch::is_privileged;
 use crate::KernelError;
-use crate::kernel::timer::get_time;
 
 /// Global Instance of EventManager
 static event_manager: Mutex<RefCell<EventTable>> = Mutex::new(RefCell::new(EventTable::new()));
@@ -27,16 +27,11 @@ pub fn sweep_event_table() {
 }
 
 /// This function is used to enable events.
-pub fn enable(event_id: EventId) -> Result<(),KernelError> {
-    critical_section(|cs_token| {
-        event_manager
-            .borrow(cs_token)
-            .borrow_mut()
-            .enable(event_id)
-    })
+pub fn enable(event_id: EventId) -> Result<(), KernelError> {
+    critical_section(|cs_token| event_manager.borrow(cs_token).borrow_mut().enable(event_id))
 }
 /// This function is used to disable events.
-pub fn disable(event_id: EventId) -> Result<(),KernelError> {
+pub fn disable(event_id: EventId) -> Result<(), KernelError> {
     critical_section(|cs_token| {
         event_manager
             .borrow(cs_token)
@@ -46,18 +41,13 @@ pub fn disable(event_id: EventId) -> Result<(),KernelError> {
 }
 
 /// Creates new Events.
-pub fn new(
-    is_enabled: bool,
-    threshold: u32,
-    handler: fn() -> (),
-) -> Result<EventId, KernelError> {
+pub fn new(is_enabled: bool, threshold: u32, handler: fn() -> ()) -> Result<EventId, KernelError> {
     priv_execute!({
         critical_section(|cs_token| {
-            event_manager.borrow(cs_token).borrow_mut().create(
-                is_enabled,
-                threshold,
-                handler,
-            )
+            event_manager
+                .borrow(cs_token)
+                .borrow_mut()
+                .create(is_enabled, threshold, handler)
         })
     })
 }

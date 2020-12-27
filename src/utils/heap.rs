@@ -5,9 +5,9 @@
 #![feature(alloc)]
 #![feature(global_allocator)]
 
-use cortex_m_rt;
 use alloc::alloc::Layout;
 use alloc_cortex_m::CortexMHeap;
+use cortex_m_rt;
 
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();

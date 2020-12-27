@@ -6,17 +6,13 @@ use crate::config::EVENT_COUNT;
 use crate::utils::errors::KernelError;
 
 #[cfg(feature = "system_logger")]
-use {
-    crate::system::system_logger::LogEventType,
-    crate::kernel::logging,
-};
+use {crate::kernel::logging, crate::system::system_logger::LogEventType};
 
 pub type EventId = usize;
 
 /// Event Descriptor
 #[derive(Clone, Copy)]
-pub struct Event
-{
+pub struct Event {
     event_id: EventId,
     /// Whether this event is currently enabled or not.
     is_enabled: bool,
@@ -31,7 +27,8 @@ impl Event {
         if self.is_enabled {
             if curr_time % self.threshold == 0 {
                 (self.handler)();
-                #[cfg(feature = "system_logger")] {
+                #[cfg(feature = "system_logger")]
+                {
                     if logging::get_timer_event() {
                         logging::report(LogEventType::TimerEvent(self.event_id));
                     }
@@ -42,16 +39,14 @@ impl Event {
 }
 
 /// Holds and Implements all Event management and dispatch methods.
-pub struct EventTable 
-{
+pub struct EventTable {
     /// This array holds the Event descriptors of all events
     events: [Option<Event>; EVENT_COUNT],
     /// Points to the current empty slot in the `event_table`.
     curr: usize,
 }
 
-impl EventTable 
-{
+impl EventTable {
     /// Returns new instance of EventManager
     pub const fn new() -> Self {
         Self {
@@ -70,15 +65,19 @@ impl EventTable
     }
 
     /// Enables an Event.
-    pub fn enable(&mut self, event_id: EventId) -> Result<(),KernelError> {
-        let event = &mut self.events[event_id].as_mut().ok_or(KernelError::NotFound)?;
+    pub fn enable(&mut self, event_id: EventId) -> Result<(), KernelError> {
+        let event = &mut self.events[event_id]
+            .as_mut()
+            .ok_or(KernelError::NotFound)?;
         event.is_enabled = true;
         Ok(())
     }
 
     /// Disables an Event.
-    pub fn disable(&mut self, event_id: EventId) -> Result<(),KernelError> {
-        let event = &mut self.events[event_id].as_mut().ok_or(KernelError::NotFound)?;
+    pub fn disable(&mut self, event_id: EventId) -> Result<(), KernelError> {
+        let event = &mut self.events[event_id]
+            .as_mut()
+            .ok_or(KernelError::NotFound)?;
         event.is_enabled = false;
         Ok(())
     }
@@ -88,7 +87,7 @@ impl EventTable
         &mut self,
         is_enabled: bool,
         threshold: u32,
-        handler: fn() -> ()
+        handler: fn() -> (),
     ) -> Result<EventId, KernelError> {
         let id = self.curr;
         if id >= self.events.len() {
@@ -98,7 +97,7 @@ impl EventTable
             event_id: id,
             is_enabled,
             threshold,
-            handler
+            handler,
         });
         self.curr += 1;
         return Ok(id);

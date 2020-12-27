@@ -8,19 +8,19 @@ pub use cortex_m::interrupt::Mutex;
 pub use cortex_m::peripheral::syst::SystClkSource;
 pub use cortex_m::peripheral::Peripherals;
 
-use cortex_m_rt::exception;
 use cortex_m::register::control;
+use cortex_m_rt::exception;
 
-use crate::kernel::tasks::{TaskManager,schedule};
+use crate::kernel::tasks::{schedule, TaskManager};
 use crate::system::scheduler::TaskControlBlock;
 
 #[cfg(any(feature = "events_32", feature = "events_16", feature = "events_64"))]
 use crate::kernel::events::sweep_event_table;
 
-#[cfg(feature="task_monitor")]
+#[cfg(feature = "task_monitor")]
 use crate::kernel::task_monitor::sweep_deadlines;
 
-#[cfg(feature="timer")]
+#[cfg(feature = "timer")]
 use crate::kernel::timer::update_time;
 
 /// Returns the MSB of `val`. It is written using CLZ instruction.
@@ -35,7 +35,7 @@ pub fn get_msb(val: u32) -> Option<usize> {
     }
     res = 32 - res;
     if res == 0 {
-        return None
+        return None;
     } else {
         res -= 1;
     }
@@ -51,10 +51,12 @@ pub fn svc_call() {
 
 #[inline(always)]
 pub unsafe fn return_to_psp() {
-        asm!("
+    asm!(
+        "
         ldr r0, =0xFFFFFFFD
         bx	r0
-        ");
+        "
+    );
 }
 
 #[inline(always)]
@@ -75,7 +77,7 @@ pub fn save_context(task_stack: &TaskControlBlock) {
             "@ldr	r1, [r2]",
             "str	r0, [r1]",
             in(reg) task_stack,
-            out("r0") _, 
+            out("r0") _,
             out("r1") _,
         )
     };
@@ -98,7 +100,7 @@ pub fn load_context(task_stack: &TaskControlBlock) {
             "ldmia	r0!,{{r4-r7}}",
             "msr	psp, r0",
             in(reg) task_stack,
-            out("r0") _, 
+            out("r0") _,
             out("r1") _,
         )
     };
@@ -110,19 +112,18 @@ pub fn load_context(task_stack: &TaskControlBlock) {
 /// The interrupt handler also calls `schedule()` in here so as to dispatch any higher priority
 /// task if there are any.
 
-#[cfg(feature="timer")]
+#[cfg(feature = "timer")]
 #[exception]
 fn SysTick() {
-
     #[cfg(any(feature = "events_32", feature = "events_16", feature = "events_64"))]
     sweep_event_table();
 
-    #[cfg(feature="timer")]
+    #[cfg(feature = "timer")]
     update_time();
-    
-    #[cfg(feature="task_monitor")]
+
+    #[cfg(feature = "task_monitor")]
     sweep_deadlines();
-    
+
     // hprintln!("hello");
     schedule();
 }
@@ -149,11 +150,11 @@ fn PendSV() {
             }
             let next_task = handler.task_control_blocks[next_tid].as_ref().unwrap();
             next_task.load_context();
-    
+
             handler.curr_tid = next_tid;
         }
     });
-    unsafe {return_to_psp()}
+    unsafe { return_to_psp() }
 }
 
 pub fn set_pendsv() {
@@ -166,5 +167,5 @@ pub fn wait_for_interrupt() {
 
 /// Returns true if Currently the Kernel is operating in Privileged mode.
 pub fn is_privileged() -> bool {
-    return control::read().npriv() == control::Npriv::Privileged
+    return control::read().npriv() == control::Npriv::Privileged;
 }
