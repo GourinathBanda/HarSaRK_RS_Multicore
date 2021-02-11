@@ -3,7 +3,7 @@
 //! Defines the Kernel routines and primitives for resource management.
 use core::cell::RefCell;
 
-use crate::kernel::tasks::{block_tasks, get_curr_tid, schedule, unblock_tasks};
+use crate::kernel::tasks::{block_tasks, get_curr_tid, schedule, unblock_tasks, TaskManager};
 use crate::system::pi_stack::PiStack;
 use crate::system::scheduler::{BooleanVector, TaskId};
 use crate::utils::arch::{critical_section, Mutex};
@@ -24,6 +24,7 @@ pub struct Resource<T: Sized> {
     ceiling: TaskId,
     /// It holds the priority of the highest priority task that can access that resource.
     tasks_mask: BooleanVector,
+    blocked_mask: RefCell<BooleanVector>,
     /// This field holds the actual resource that has to be locked.
     inner: T,
 }
@@ -35,6 +36,7 @@ impl<T: Sized> Resource<T> {
         Self {
             inner: val,
             tasks_mask: tasks_mask,
+            blocked_mask: RefCell::new(0),
             ceiling: get_msb_const(tasks_mask) as TaskId,
         }
     }
@@ -63,8 +65,13 @@ impl<T: Sized> Resource<T> {
             }
             if ceiling as i32 > pi_stack.system_ceiling {
                 pi_stack.push_stack(ceiling)?;
-                let mask = Self::get_pi_mask(ceiling) & !(1 << curr_tid);
-                block_tasks(mask);
+                // XXX(bitops): self.tasks_mask & !blocked_tasks
+                // gives the task mask which are the tasks which will be blocked by calling this
+                // specific lock. we use this mask to be unlock the tasks which are blocked by the
+                // lock of this resource.
+                *self.blocked_mask.borrow_mut() =
+                    self.tasks_mask & !TaskManager.borrow(cs_token).borrow().blocked_tasks;
+                block_tasks(!(1 << curr_tid) & self.tasks_mask);
                 #[cfg(feature = "system_logger")]
                 {
                     if logging::get_resource_lock() {
@@ -83,8 +90,7 @@ impl<T: Sized> Resource<T> {
             let pi_stack = &mut PiStackGlobal.borrow(cs_token).borrow_mut();
             if self.ceiling as i32 == pi_stack.system_ceiling {
                 pi_stack.pop_stack()?;
-                let mask = Self::get_pi_mask(self.ceiling);
-                unblock_tasks(mask);
+                unblock_tasks(*self.blocked_mask.borrow());
                 schedule();
             }
             #[cfg(feature = "system_logger")]
