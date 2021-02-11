@@ -20,9 +20,9 @@ pub struct Scheduler {
     pub started: bool,
     /// An Array of task control blocks corresponding to each task (created only if task exists).
     pub task_control_blocks: [Option<TaskControlBlock>; MAX_TASKS],
-    /// A boolean vector in which, if a bit at a position is true, it implies that the task is active and to be scheduled.
-    pub blocked_tasks: BooleanVector,
     /// A boolean vector in which, if a bit at a position is true, it implies that the task is blocked and cannot be scheduled even if it’s active.
+    pub blocked_tasks: BooleanVector,
+    /// A boolean vector in which, if a bit at a position is true, it implies that the task is active and to be scheduled.
     pub active_tasks: BooleanVector,
     /// A variable which decided if the scheduler should preemptively schedule tasks or not.
     pub is_preemptive: bool,

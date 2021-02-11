@@ -38,7 +38,6 @@ impl Semaphore {
                     logging::report(LogEventType::SemaphoreSignal(*flags, self.tasks));
                 }
             }
-            schedule();
         })
     }
 

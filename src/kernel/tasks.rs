@@ -154,6 +154,7 @@ pub fn release(tasks_mask: BooleanVector) {
             .borrow_mut()
             .release(tasks_mask)
     });
+    schedule();
 }
 
 /// Enable preemptive scheduling
