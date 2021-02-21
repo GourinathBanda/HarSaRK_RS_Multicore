@@ -18,23 +18,25 @@
 /// ```
 #[macro_export]
 macro_rules! spawn {
-    ($priority: expr, $stack: expr, $handler_fn: block) => {
+    ($tm: expr, $priority: expr, $stack: expr, $handler_fn: block) => {
         create_task(
+            $tm,
             $priority,
             unsafe{ &mut $stack },
             || loop {
                 $handler_fn
-                task_exit();
+                task_exit($tm);
         }).unwrap();
     };
-    ($priority: expr, $deadline: expr, $stack: expr, $handler_fn: block) => {
+    ($tm: expr, $priority: expr, $deadline: expr, $stack: expr, $handler_fn: block) => {
         create_task(
+            $tm,
             $priority,
             $deadline,
             unsafe{ &mut $stack },
             || loop {
                 $handler_fn
-                task_exit();
+                task_exit($tm);
         }).unwrap();
     };
 }

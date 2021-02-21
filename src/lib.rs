@@ -73,6 +73,10 @@ pub mod tasks {
     pub use crate::kernel::tasks::release;
     pub use crate::kernel::tasks::start_kernel;
     pub use crate::kernel::tasks::task_exit;
+    pub use crate::kernel::tasks::TaskManager;
+    pub use crate::kernel::tasks::TaskManager_C1;
+    // TODO: move to another namespace or remove
+    pub use crate::system::scheduler::Scheduler;
 }
 
 #[cfg(feature = "system_logger")]

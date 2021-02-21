@@ -1,8 +1,8 @@
 //! # Software synchronization bus definition
 //!
 use crate::kernel::tasks::{get_curr_tid, release, schedule};
-use crate::system::scheduler::BooleanVector;
-use crate::utils::arch::critical_section;
+use crate::system::scheduler::{BooleanVector, Scheduler};
+use crate::utils::arch::{critical_section, Mutex};
 use crate::KernelError;
 use core::cell::RefCell;
 
@@ -15,12 +15,17 @@ pub struct Semaphore {
     pub flags: RefCell<BooleanVector>,
     /// It is a boolean vector that corresponds to the tasks that are to be released by the semaphore on being signaled.
     pub tasks: BooleanVector,
+
+    /// A reference to access the kernel functions
+    // TODO: remove this static lifetime? use Arc?
+    task_manager: &'static Mutex<RefCell<Scheduler>>,
 }
 
 impl Semaphore {
     /// Initializes a new semaphore instance.
-    pub const fn new(tasks: BooleanVector) -> Self {
+    pub const fn new(task_manager: &'static Mutex<RefCell<Scheduler>>, tasks: BooleanVector) -> Self {
         Self {
+            task_manager,
             flags: RefCell::new(0),
             tasks,
         }
@@ -31,7 +36,7 @@ impl Semaphore {
         critical_section(|_| {
             let flags: &mut BooleanVector = &mut self.flags.borrow_mut();
             *flags |= tasks_mask;
-            release(self.tasks);
+            release(self.task_manager, self.tasks);
             #[cfg(feature = "system_logger")]
             {
                 if logging::get_semaphore_signal() {
@@ -44,7 +49,7 @@ impl Semaphore {
     /// Checks if the flag was enabled for the currently running task.
     pub fn test_and_reset(&'static self) -> Result<bool, KernelError> {
         critical_section(|_| {
-            let curr_tid = get_curr_tid() as u32;
+            let curr_tid = get_curr_tid(self.task_manager) as u32;
             let curr_tid_mask = 1 << curr_tid;
             let flags: &mut BooleanVector = &mut self.flags.borrow_mut();
             if *flags & curr_tid_mask == curr_tid_mask {

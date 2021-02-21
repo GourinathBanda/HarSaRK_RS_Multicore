@@ -18,17 +18,19 @@ use crate::system::system_logger::LogEventType;
 /// Global Scheduler instance
 #[no_mangle]
 pub static TaskManager: Mutex<RefCell<Scheduler>> = Mutex::new(RefCell::new(Scheduler::new()));
+#[no_mangle]
+pub static TaskManager_C1: Mutex<RefCell<Scheduler>> = Mutex::new(RefCell::new(Scheduler::new()));
 
 /// Initializes the Kernel scheduler and creates the idle task, a task that puts the CPU to sleep in a loop.
 /// The idle task is created with zero priority; hence, it is only executed when no other task is in Ready state.
-pub fn init() -> Result<(), KernelError> {
-    critical_section(|cs_token| TaskManager.borrow(cs_token).borrow_mut().init())
+pub fn init(task_manager: &'static Mutex<RefCell<Scheduler>>) -> Result<(), KernelError> {
+    critical_section(|cs_token| task_manager.borrow(cs_token).borrow_mut().init())
 }
 
 /// Starts the Kernel scheduler, which starts scheduling tasks on the CPU.
-pub fn start_kernel() -> ! {
+pub fn start_kernel(task_manager: &'static Mutex<RefCell<Scheduler>>) -> ! {
     loop {
-        schedule();
+        schedule(task_manager);
     }
 }
 
@@ -55,13 +57,14 @@ pub fn create_task(
 #[cfg(not(feature = "task_monitor"))]
 /// Create a new task with the configuration set as arguments passed.
 pub fn create_task(
+    task_manager: &'static Mutex<RefCell<Scheduler>>,
     priority: TaskId,
     stack: &mut [u32],
     handler_fn: fn() -> !,
 ) -> Result<(), KernelError> {
     priv_execute!({
         critical_section(|cs_token| {
-            TaskManager.borrow(cs_token).borrow_mut().create_task(
+            task_manager.borrow(cs_token).borrow_mut().create_task(
                 priority as usize,
                 stack,
                 handler_fn,
@@ -69,13 +72,14 @@ pub fn create_task(
         })
     })
 }
+
 /// This function is called from both privileged and unprivileged context.
 /// Hence if the function is called from privileged context, then `preempt()` is called.
 /// Else, the `svc_call()` is executed, this function creates the SVC exception.
 /// And the SVC handler calls schedule again. Thus, the permission level is raised to privileged via the exception.
-pub fn schedule() {
+pub fn schedule(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     let is_preemptive =
-        critical_section(|cs_token| TaskManager.borrow(cs_token).borrow_mut().is_preemptive);
+        critical_section(|cs_token| task_manager.borrow(cs_token).borrow_mut().is_preemptive);
     if is_preemptive {
         match is_privileged() {
             true => preempt(),
@@ -89,8 +93,8 @@ fn preempt() {
 }
 
 /// Returns the TaskId of the currently running task in the kernel.
-pub fn get_curr_tid() -> TaskId {
-    critical_section(|cs_token| TaskManager.borrow(cs_token).borrow().curr_tid as TaskId)
+pub fn get_curr_tid(task_manager: &'static Mutex<RefCell<Scheduler>>) -> TaskId {
+    critical_section(|cs_token| task_manager.borrow(cs_token).borrow().curr_tid as TaskId)
 }
 
 /// The Kernel blocks the tasks mentioned in `tasks_mask`.
@@ -126,9 +130,9 @@ pub fn unblock_tasks(tasks_mask: BooleanVector) {
 }
 
 /// The `task_exit` function is called just after a task finishes execution. It marks the current running task as finished and then schedules the next high priority task.
-pub fn task_exit() {
+pub fn task_exit(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     critical_section(|cs_token| {
-        let handler = &mut TaskManager.borrow(cs_token).borrow_mut();
+        let handler = &mut task_manager.borrow(cs_token).borrow_mut();
         let curr_tid = handler.curr_tid;
         #[cfg(feature = "system_logger")]
         {
@@ -138,10 +142,10 @@ pub fn task_exit() {
         }
         handler.active_tasks &= !(1 << curr_tid as u32);
     });
-    schedule()
+    schedule(task_manager)
 }
 /// The Kernel releases the tasks in the `task_mask`, these tasks transition from the waiting to the ready state.
-pub fn release(tasks_mask: BooleanVector) {
+pub fn release(task_manager: &'static Mutex<RefCell<Scheduler>>, tasks_mask: BooleanVector) {
     #[cfg(feature = "system_logger")]
     {
         if logging::get_release() {
@@ -149,18 +153,18 @@ pub fn release(tasks_mask: BooleanVector) {
         }
     }
     critical_section(|cs_token| {
-        TaskManager
+        task_manager
             .borrow(cs_token)
             .borrow_mut()
             .release(tasks_mask)
     });
-    schedule();
+    schedule(task_manager);
 }
 
 /// Enable preemptive scheduling
-pub fn enable_preemption() {
+pub fn enable_preemption(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     critical_section(|cs_token| {
-        let handler = &mut TaskManager.borrow(cs_token).borrow_mut();
+        let handler = &mut task_manager.borrow(cs_token).borrow_mut();
         handler.preempt_disable_count -= 1;
         if handler.preempt_disable_count == 0 {
             handler.is_preemptive = true;
@@ -169,9 +173,9 @@ pub fn enable_preemption() {
 }
 
 /// Disable preemptive scheduling
-pub fn disable_preemption() {
+pub fn disable_preemption(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     critical_section(|cs_token| {
-        let handler = &mut TaskManager.borrow(cs_token).borrow_mut();
+        let handler = &mut task_manager.borrow(cs_token).borrow_mut();
         handler.preempt_disable_count += 1;
         handler.is_preemptive = false;
     })

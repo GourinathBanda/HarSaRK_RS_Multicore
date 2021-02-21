@@ -3,12 +3,13 @@
 //! Defines the Kernel routines and primitives for resource management.
 use core::cell::RefCell;
 
-use crate::kernel::tasks::{block_tasks, get_curr_tid, schedule, unblock_tasks, TaskManager};
+use crate::kernel::tasks::{block_tasks, get_curr_tid, schedule, unblock_tasks};
 use crate::system::pi_stack::PiStack;
-use crate::system::scheduler::{BooleanVector, TaskId};
+use crate::system::scheduler::{BooleanVector, TaskId, Scheduler};
 use crate::utils::arch::{critical_section, Mutex};
 use crate::utils::helpers::get_msb_const;
 use crate::KernelError;
+use cortex_m_semihosting::hprintln;
 
 #[cfg(feature = "system_logger")]
 use {crate::kernel::logging, crate::system::system_logger::LogEventType};
@@ -18,7 +19,8 @@ static PiStackGlobal: Mutex<RefCell<PiStack>> = Mutex::new(RefCell::new(PiStack:
 
 /// A Safe Container to store a resource, it can hold resource of any Generic Type
 /// and allow safe access to it without ending up in Data races or Deadlocks.
-#[derive(Debug)]
+// TODO: Fix debug
+// #[derive(Debug)]
 pub struct Resource<T: Sized> {
     /// An boolean vector holding which tasks have access to the resource.
     ceiling: TaskId,
@@ -27,13 +29,17 @@ pub struct Resource<T: Sized> {
     blocked_mask: RefCell<BooleanVector>,
     /// This field holds the actual resource that has to be locked.
     inner: T,
+
+    /// A reference to access the kernel functions
+    task_manager: &'static Mutex<RefCell<Scheduler>>,
 }
 
 impl<T: Sized> Resource<T> {
     /// Create and initialize new Resource object
-    pub const fn new(val: T, tasks_mask: BooleanVector) -> Self {
+    pub const fn new(task_manager: &'static Mutex<RefCell<Scheduler>>, val: T, tasks_mask: BooleanVector) -> Self {
         let tasks_mask = tasks_mask | 1;
         Self {
+            task_manager,
             inner: val,
             tasks_mask: tasks_mask,
             blocked_mask: RefCell::new(0),
@@ -56,7 +62,7 @@ impl<T: Sized> Resource<T> {
     fn lock(&self) -> Result<&T, KernelError> {
         critical_section(|cs_token| {
             let pi_stack = &mut PiStackGlobal.borrow(cs_token).borrow_mut();
-            let curr_tid = get_curr_tid() as u32;
+            let curr_tid = get_curr_tid(self.task_manager) as u32;
 
             let ceiling = self.ceiling;
             let pid_mask = 1 << curr_tid;
@@ -70,7 +76,7 @@ impl<T: Sized> Resource<T> {
                 // specific lock. we use this mask to be unlock the tasks which are blocked by the
                 // lock of this resource.
                 *self.blocked_mask.borrow_mut() =
-                    self.tasks_mask & !TaskManager.borrow(cs_token).borrow().blocked_tasks;
+                    self.tasks_mask & !self.task_manager.borrow(cs_token).borrow().blocked_tasks;
                 block_tasks(!(1 << curr_tid) & self.tasks_mask);
                 #[cfg(feature = "system_logger")]
                 {
@@ -91,12 +97,12 @@ impl<T: Sized> Resource<T> {
             if self.ceiling as i32 == pi_stack.system_ceiling {
                 pi_stack.pop_stack()?;
                 unblock_tasks(*self.blocked_mask.borrow());
-                schedule();
+                schedule(self.task_manager);
             }
             #[cfg(feature = "system_logger")]
             {
                 if logging::get_resource_unlock() {
-                    logging::report(LogEventType::ResourceUnlock(get_curr_tid() as u32));
+                    logging::report(LogEventType::ResourceUnlock(get_curr_tid(self.task_manager) as u32));
                 }
             }
             Ok(())

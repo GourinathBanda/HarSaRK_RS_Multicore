@@ -11,7 +11,7 @@ pub use cortex_m::peripheral::Peripherals;
 use cortex_m::register::control;
 use cortex_m_rt::exception;
 
-use crate::kernel::tasks::{schedule, TaskManager};
+use crate::kernel::tasks::{schedule, TaskManager, TaskManager_C1};
 use crate::system::scheduler::TaskControlBlock;
 
 #[cfg(any(feature = "events_32", feature = "events_16", feature = "events_64"))]
@@ -125,20 +125,75 @@ fn SysTick() {
     sweep_deadlines();
 
     // hprintln!("hello");
-    schedule();
+    // schedule();
 }
 /// ### SVC Interrupt handler,
 /// calls `tasks::schedule()`
-#[exception]
-fn SVCall() {
-    schedule();
+// #[exception]
+// fn SVCall() {
+//     schedule();
+// }
+
+#[export_name = "SVCall_0"]
+pub extern "C" fn SVCall_0() {
+    schedule(&TaskManager);
 }
+
+#[export_name = "SVCall_1"]
+pub extern "C" fn SVCall_1() {
+    schedule(&TaskManager_C1);
+}
+
 /// ### PendSV Interrupt handler,
 /// PendSV interrupt handler does the actual context switch in the Kernel.
 #[exception]
 fn PendSV() {
     critical_section(|cs_token| {
         let handler = &mut TaskManager.borrow(cs_token).borrow_mut();
+        let curr_tid: usize = handler.curr_tid;
+        let next_tid: usize = handler.get_next_tid() as usize;
+        if curr_tid != next_tid || (!handler.started) {
+            if handler.started {
+                let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+                curr_task.save_context();
+            } else {
+                handler.started = true;
+            }
+            let next_task = handler.task_control_blocks[next_tid].as_ref().unwrap();
+            next_task.load_context();
+
+            handler.curr_tid = next_tid;
+        }
+    });
+    unsafe { return_to_psp() }
+}
+
+#[export_name = "PendSV_0"]
+pub extern "C" fn PendSV_0() {
+    critical_section(|cs_token| {
+        let handler = &mut TaskManager.borrow(cs_token).borrow_mut();
+        let curr_tid: usize = handler.curr_tid;
+        let next_tid: usize = handler.get_next_tid() as usize;
+        if curr_tid != next_tid || (!handler.started) {
+            if handler.started {
+                let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+                curr_task.save_context();
+            } else {
+                handler.started = true;
+            }
+            let next_task = handler.task_control_blocks[next_tid].as_ref().unwrap();
+            next_task.load_context();
+
+            handler.curr_tid = next_tid;
+        }
+    });
+    unsafe { return_to_psp() }
+}
+
+#[export_name = "PendSV_1"]
+pub extern "C" fn PendSV_1() {
+    critical_section(|cs_token| {
+        let handler = &mut TaskManager_C1.borrow(cs_token).borrow_mut();
         let curr_tid: usize = handler.curr_tid;
         let next_tid: usize = handler.get_next_tid() as usize;
         if curr_tid != next_tid || (!handler.started) {

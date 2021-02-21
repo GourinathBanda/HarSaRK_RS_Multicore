@@ -5,8 +5,9 @@ use core::cell::RefCell;
 
 use crate::system::scheduler::BooleanVector;
 use crate::system::semaphore::Semaphore;
+use crate::system::scheduler::Scheduler;
 use crate::tasks::get_curr_tid;
-use crate::utils::arch::critical_section;
+use crate::utils::arch::{critical_section, Mutex};
 
 #[cfg(feature = "system_logger")]
 use {crate::kernel::logging, crate::system::system_logger::LogEventType};
@@ -20,11 +21,11 @@ pub struct Message<T: Sized + Clone> {
 
 impl<T: Sized + Clone> Message<T> {
     /// Create and initialize new message object
-    pub const fn new(tasks_mask: BooleanVector, receivers_mask: BooleanVector, value: T) -> Self {
+    pub const fn new(task_manager: &'static Mutex<RefCell<Scheduler>>, tasks_mask: BooleanVector, receivers_mask: BooleanVector, value: T) -> Self {
         Self {
             value: RefCell::new(value),
             receivers: receivers_mask,
-            semaphore: Semaphore::new(tasks_mask),
+            semaphore: Semaphore::new(task_manager, tasks_mask),
         }
     }
 
@@ -51,7 +52,8 @@ impl<T: Sized + Clone> Message<T> {
                 #[cfg(feature = "system_logger")]
                 {
                     if logging::get_message_recieve() {
-                        logging::report(LogEventType::MessageRecieve(get_curr_tid() as u32));
+                        // TODO: Fix
+                        // logging::report(LogEventType::MessageRecieve(get_curr_tid() as u32));
                     }
                 }
                 Some(self.value.borrow().clone())
