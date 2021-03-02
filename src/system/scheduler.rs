@@ -13,6 +13,7 @@ pub type BooleanVector = u32;
 
 /// Maintains state of all tasks in the Kernel
 #[repr(C)]
+// #[derive(Debug)]
 pub struct Scheduler {
     /// The Task id of the currently running task.
     pub curr_tid: usize,

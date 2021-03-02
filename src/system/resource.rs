@@ -15,7 +15,8 @@ use cortex_m_semihosting::hprintln;
 use {crate::kernel::logging, crate::system::system_logger::LogEventType};
 
 /// Global instance of Resource manager
-static PiStackGlobal: Mutex<RefCell<PiStack>> = Mutex::new(RefCell::new(PiStack::new()));
+pub static PiStackGlobal: Mutex<RefCell<PiStack>> = Mutex::new(RefCell::new(PiStack::new()));
+pub static PiStackGlobal_C1: Mutex<RefCell<PiStack>> = Mutex::new(RefCell::new(PiStack::new()));
 
 /// A Safe Container to store a resource, it can hold resource of any Generic Type
 /// and allow safe access to it without ending up in Data races or Deadlocks.
@@ -32,14 +33,17 @@ pub struct Resource<T: Sized> {
 
     /// A reference to access the kernel functions
     task_manager: &'static Mutex<RefCell<Scheduler>>,
+    // TODO: put pi_stack in task_manager?
+    pi_stack: &'static Mutex<RefCell<PiStack>>,
 }
 
 impl<T: Sized> Resource<T> {
     /// Create and initialize new Resource object
-    pub const fn new(task_manager: &'static Mutex<RefCell<Scheduler>>, val: T, tasks_mask: BooleanVector) -> Self {
+    pub const fn new(task_manager: &'static Mutex<RefCell<Scheduler>>, pi_stack: &'static Mutex<RefCell<PiStack>>, val: T, tasks_mask: BooleanVector) -> Self {
         let tasks_mask = tasks_mask | 1;
         Self {
             task_manager,
+            pi_stack,
             inner: val,
             tasks_mask: tasks_mask,
             blocked_mask: RefCell::new(0),
@@ -59,14 +63,15 @@ impl<T: Sized> Resource<T> {
     }
 
     /// Lock the Resource for the currently running task and blocks the competing tasks
-    fn lock(&self) -> Result<&T, KernelError> {
+    pub(crate) fn lock(&self) -> Result<&T, KernelError> {
         critical_section(|cs_token| {
-            let pi_stack = &mut PiStackGlobal.borrow(cs_token).borrow_mut();
+            let pi_stack = &mut self.pi_stack.borrow(cs_token).borrow_mut();
             let curr_tid = get_curr_tid(self.task_manager) as u32;
 
             let ceiling = self.ceiling;
             let pid_mask = 1 << curr_tid;
             if self.tasks_mask & pid_mask != pid_mask {
+                hprintln!("here. task_mask={:b}, pid_mask={:b}", self.tasks_mask, pid_mask);
                 return Err(KernelError::AccessDenied);
             }
             if ceiling as i32 > pi_stack.system_ceiling {
@@ -86,12 +91,13 @@ impl<T: Sized> Resource<T> {
                 }
                 return Ok(&self.inner);
             }
+            hprintln!("lol here ceiling={}, system_ceiling={}", ceiling, pi_stack.system_ceiling);
             return Err(KernelError::AccessDenied);
         })
     }
 
     /// Unlocks the Resource and unblocks the tasks which were blocked during the call to lock
-    fn unlock(&self) -> Result<(), KernelError> {
+    pub(crate) fn unlock(&self) -> Result<(), KernelError> {
         critical_section(|cs_token| {
             let pi_stack = &mut PiStackGlobal.borrow(cs_token).borrow_mut();
             if self.ceiling as i32 == pi_stack.system_ceiling {

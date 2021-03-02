@@ -5,6 +5,7 @@ mod pi_stack;
 pub mod resource;
 pub mod scheduler;
 pub mod semaphore;
+pub mod shared;
 
 #[cfg(any(feature = "events_32", feature = "events_16", feature = "events_64"))]
 pub mod event;
