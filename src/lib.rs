@@ -57,11 +57,11 @@ pub mod timer {
 /// Kernel primitives which assist application development.
 pub mod primitives {
     pub use crate::system::message::Message;
-    pub use crate::system::resource::Resource;
     pub use crate::system::resource::PiStackGlobal;
     pub use crate::system::resource::PiStackGlobal_C1;
-    pub use crate::system::shared::{Shared, SharedResource};
+    pub use crate::system::resource::Resource;
     pub use crate::system::semaphore::Semaphore;
+    pub use crate::system::shared::{Shared, SharedResource};
 }
 
 /// Kernel routines which assist in Task management.

@@ -5,7 +5,7 @@ use core::cell::RefCell;
 
 use crate::kernel::tasks::{block_tasks, get_curr_tid, schedule, unblock_tasks};
 use crate::system::pi_stack::PiStack;
-use crate::system::scheduler::{BooleanVector, TaskId, Scheduler};
+use crate::system::scheduler::{BooleanVector, Scheduler, TaskId};
 use crate::utils::arch::{critical_section, Mutex};
 use crate::utils::helpers::get_msb_const;
 use crate::KernelError;
@@ -39,7 +39,12 @@ pub struct Resource<T: Sized> {
 
 impl<T: Sized> Resource<T> {
     /// Create and initialize new Resource object
-    pub const fn new(task_manager: &'static Mutex<RefCell<Scheduler>>, pi_stack: &'static Mutex<RefCell<PiStack>>, val: T, tasks_mask: BooleanVector) -> Self {
+    pub const fn new(
+        task_manager: &'static Mutex<RefCell<Scheduler>>,
+        pi_stack: &'static Mutex<RefCell<PiStack>>,
+        val: T,
+        tasks_mask: BooleanVector,
+    ) -> Self {
         let tasks_mask = tasks_mask | 1;
         Self {
             task_manager,
@@ -71,7 +76,11 @@ impl<T: Sized> Resource<T> {
             let ceiling = self.ceiling;
             let pid_mask = 1 << curr_tid;
             if self.tasks_mask & pid_mask != pid_mask {
-                hprintln!("here. task_mask={:b}, pid_mask={:b}", self.tasks_mask, pid_mask);
+                hprintln!(
+                    "here. task_mask={:b}, pid_mask={:b}",
+                    self.tasks_mask,
+                    pid_mask
+                );
                 return Err(KernelError::AccessDenied);
             }
             if ceiling as i32 > pi_stack.system_ceiling {
@@ -91,7 +100,11 @@ impl<T: Sized> Resource<T> {
                 }
                 return Ok(&self.inner);
             }
-            hprintln!("lol here ceiling={}, system_ceiling={}", ceiling, pi_stack.system_ceiling);
+            hprintln!(
+                "lol here ceiling={}, system_ceiling={}",
+                ceiling,
+                pi_stack.system_ceiling
+            );
             return Err(KernelError::AccessDenied);
         })
     }
@@ -108,7 +121,9 @@ impl<T: Sized> Resource<T> {
             #[cfg(feature = "system_logger")]
             {
                 if logging::get_resource_unlock() {
-                    logging::report(LogEventType::ResourceUnlock(get_curr_tid(self.task_manager) as u32));
+                    logging::report(LogEventType::ResourceUnlock(
+                        get_curr_tid(self.task_manager) as u32,
+                    ));
                 }
             }
             Ok(())

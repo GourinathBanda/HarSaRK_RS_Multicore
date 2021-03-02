@@ -23,7 +23,10 @@ pub struct Semaphore {
 
 impl Semaphore {
     /// Initializes a new semaphore instance.
-    pub const fn new(task_manager: &'static Mutex<RefCell<Scheduler>>, tasks: BooleanVector) -> Self {
+    pub const fn new(
+        task_manager: &'static Mutex<RefCell<Scheduler>>,
+        tasks: BooleanVector,
+    ) -> Self {
         Self {
             task_manager,
             flags: RefCell::new(0),
