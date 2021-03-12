@@ -8,12 +8,13 @@ use crate::utils::arch::is_privileged;
 use crate::utils::arch::{critical_section, svc_call, Mutex};
 use crate::KernelError;
 
-static TASK_MONITOR: Mutex<RefCell<TaskMonitor>> = Mutex::new(RefCell::new(TaskMonitor::new()));
+static TASK_MONITOR: Mutex<spin::Mutex<RefCell<TaskMonitor>>> = Mutex::new(spin::Mutex::new(RefCell::new(TaskMonitor::new())));
 
 pub fn set_deadline(tid: TaskId, deadline: u32) {
     critical_section(|cs_token| {
         TASK_MONITOR
             .borrow(cs_token)
+            .lock()
             .borrow_mut()
             .set_deadline(tid, get_time() + deadline);
     })
@@ -23,6 +24,7 @@ pub fn set_handler(handler: fn()) {
     critical_section(|cs_token| {
         TASK_MONITOR
             .borrow(cs_token)
+            .lock()
             .borrow_mut()
             .set_handler(handler);
     })
@@ -32,6 +34,7 @@ pub fn clear_deadline(tid: TaskId) {
     critical_section(|cs_token| {
         TASK_MONITOR
             .borrow(cs_token)
+            .lock()
             .borrow_mut()
             .clear_deadline(tid);
     })
@@ -41,6 +44,7 @@ pub fn sweep_deadlines() {
     critical_section(|cs_token| {
         TASK_MONITOR
             .borrow(cs_token)
+            .lock()
             .borrow_mut()
             .sweep_deadlines(get_time());
     })

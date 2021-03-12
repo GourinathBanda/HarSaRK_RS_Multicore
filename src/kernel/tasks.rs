@@ -8,6 +8,7 @@ use crate::priv_execute;
 use crate::system::scheduler::*;
 use crate::utils::arch::is_privileged;
 use crate::utils::arch::{critical_section, set_pendsv, svc_call, Mutex};
+use crate::system::spinlock::{spinlock, spinlock_try, spinunlock, TASKMANAGER_LOCK};
 use crate::KernelError;
 
 #[cfg(feature = "system_logger")]
@@ -23,8 +24,8 @@ pub static TaskManager_C1: Mutex<RefCell<Scheduler>> = Mutex::new(RefCell::new(S
 
 /// Initializes the Kernel scheduler and creates the idle task, a task that puts the CPU to sleep in a loop.
 /// The idle task is created with zero priority; hence, it is only executed when no other task is in Ready state.
-pub fn init(task_manager: &'static Mutex<RefCell<Scheduler>>) -> Result<(), KernelError> {
-    critical_section(|cs_token| task_manager.borrow(cs_token).borrow_mut().init())
+pub fn init(task_manager: &'static Mutex<RefCell<Scheduler>>, mut stack: &mut [u32]) -> Result<(), KernelError> {
+    critical_section(|cs_token| task_manager.borrow(cs_token).borrow_mut().init(&mut stack))
 }
 
 /// Starts the Kernel scheduler, which starts scheduling tasks on the CPU.
@@ -79,7 +80,12 @@ pub fn create_task(
 /// And the SVC handler calls schedule again. Thus, the permission level is raised to privileged via the exception.
 pub fn schedule(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     let is_preemptive =
-        critical_section(|cs_token| task_manager.borrow(cs_token).borrow_mut().is_preemptive);
+        critical_section(|cs_token| {
+            spinlock(&TASKMANAGER_LOCK);
+            let t = task_manager.borrow(cs_token).borrow().is_preemptive;
+            spinunlock(&TASKMANAGER_LOCK);
+            t
+        });
     if is_preemptive {
         match is_privileged() {
             true => preempt(),
@@ -98,7 +104,7 @@ pub fn get_curr_tid(task_manager: &'static Mutex<RefCell<Scheduler>>) -> TaskId 
 }
 
 /// The Kernel blocks the tasks mentioned in `tasks_mask`.
-pub fn block_tasks(tasks_mask: BooleanVector) {
+pub fn block_tasks(task_manager: &'static Mutex<RefCell<Scheduler>>, tasks_mask: BooleanVector) {
     #[cfg(feature = "system_logger")]
     {
         if logging::get_block_tasks() {
@@ -106,15 +112,17 @@ pub fn block_tasks(tasks_mask: BooleanVector) {
         }
     }
     critical_section(|cs_token| {
-        TaskManager
+        spinlock(&TASKMANAGER_LOCK);
+        task_manager
             .borrow(cs_token)
             .borrow_mut()
-            .block_tasks(tasks_mask)
+            .block_tasks(tasks_mask);
+        spinunlock(&TASKMANAGER_LOCK);
     })
 }
 
 /// The Kernel unblocks the tasks mentioned in tasks_mask.
-pub fn unblock_tasks(tasks_mask: BooleanVector) {
+pub fn unblock_tasks(task_manager: &'static Mutex<RefCell<Scheduler>>, tasks_mask: BooleanVector) {
     #[cfg(feature = "system_logger")]
     {
         if logging::get_unblock_tasks() {
@@ -122,16 +130,19 @@ pub fn unblock_tasks(tasks_mask: BooleanVector) {
         }
     }
     critical_section(|cs_token| {
-        TaskManager
+        spinlock(&TASKMANAGER_LOCK);
+        task_manager
             .borrow(cs_token)
             .borrow_mut()
-            .unblock_tasks(tasks_mask)
+            .unblock_tasks(tasks_mask);
+        spinunlock(&TASKMANAGER_LOCK);
     })
 }
 
 /// The `task_exit` function is called just after a task finishes execution. It marks the current running task as finished and then schedules the next high priority task.
 pub fn task_exit(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     critical_section(|cs_token| {
+        spinlock(&TASKMANAGER_LOCK);
         let handler = &mut task_manager.borrow(cs_token).borrow_mut();
         let curr_tid = handler.curr_tid;
         #[cfg(feature = "system_logger")]
@@ -141,6 +152,7 @@ pub fn task_exit(task_manager: &'static Mutex<RefCell<Scheduler>>) {
             }
         }
         handler.active_tasks &= !(1 << curr_tid as u32);
+        spinunlock(&TASKMANAGER_LOCK);
     });
     schedule(task_manager)
 }

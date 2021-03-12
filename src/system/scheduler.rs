@@ -25,6 +25,9 @@ pub struct Scheduler {
     pub blocked_tasks: BooleanVector,
     /// A boolean vector in which, if a bit at a position is true, it implies that the task is active and to be scheduled.
     pub active_tasks: BooleanVector,
+    pub migrated_tasks: BooleanVector,
+    pub running_migrated: bool,
+    pub migrated_tid: usize,
     /// A variable which decided if the scheduler should preemptively schedule tasks or not.
     pub is_preemptive: bool,
     pub preempt_disable_count: u32,
@@ -66,6 +69,9 @@ impl Scheduler {
             task_control_blocks: [None; MAX_TASKS],
             active_tasks: 1,
             blocked_tasks: 0,
+            migrated_tasks: 0,
+            migrated_tid: 0,
+            running_migrated: false,
             is_preemptive: false,
             preempt_disable_count: 0,
         }
@@ -82,11 +88,11 @@ impl Scheduler {
     }
 
     #[cfg(not(feature = "task_monitor"))]
-    pub fn init(&mut self) -> Result<(), KernelError> {
+    pub fn init(&mut self, mut stack: &mut [u32]) -> Result<(), KernelError> {
         self.is_preemptive = true;
 
         static mut stack0: [u32; 64] = [0; 64];
-        self.create_task(0, unsafe { &mut stack0 }, || loop {
+        self.create_task(0, unsafe { &mut stack }, || loop {
             wait_for_interrupt();
         })
     }
@@ -195,7 +201,7 @@ impl Scheduler {
     /// corresponding to the tasks in the ready state. The tasks in the ready state can be identified
     /// by the boolean and of `active_tasks` and boolean not(`blocked_tasks`).
     pub fn get_next_tid(&self) -> usize {
-        let mask = self.active_tasks & !self.blocked_tasks;
+        let mask = self.active_tasks & !self.blocked_tasks & !self.migrated_tasks;
         return get_msb(mask).unwrap();
     }
 

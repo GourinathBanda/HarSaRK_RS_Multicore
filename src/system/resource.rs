@@ -26,13 +26,13 @@ pub struct Resource<T: Sized> {
     /// An boolean vector holding which tasks have access to the resource.
     ceiling: TaskId,
     /// It holds the priority of the highest priority task that can access that resource.
-    tasks_mask: BooleanVector,
+    pub(crate) tasks_mask: BooleanVector,
     blocked_mask: RefCell<BooleanVector>,
     /// This field holds the actual resource that has to be locked.
     inner: T,
 
     /// A reference to access the kernel functions
-    task_manager: &'static Mutex<RefCell<Scheduler>>,
+    pub(crate) task_manager: &'static Mutex<RefCell<Scheduler>>,
     // TODO: put pi_stack in task_manager?
     pi_stack: &'static Mutex<RefCell<PiStack>>,
 }
@@ -91,7 +91,7 @@ impl<T: Sized> Resource<T> {
                 // lock of this resource.
                 *self.blocked_mask.borrow_mut() =
                     self.tasks_mask & !self.task_manager.borrow(cs_token).borrow().blocked_tasks;
-                block_tasks(!(1 << curr_tid) & self.tasks_mask);
+                block_tasks(self.task_manager, !(1 << curr_tid) & self.tasks_mask);
                 #[cfg(feature = "system_logger")]
                 {
                     if logging::get_resource_lock() {
@@ -115,9 +115,9 @@ impl<T: Sized> Resource<T> {
             let pi_stack = &mut PiStackGlobal.borrow(cs_token).borrow_mut();
             if self.ceiling as i32 == pi_stack.system_ceiling {
                 pi_stack.pop_stack()?;
-                unblock_tasks(*self.blocked_mask.borrow());
-                schedule(self.task_manager);
             }
+            unblock_tasks(self.task_manager, *self.blocked_mask.borrow());
+            schedule(self.task_manager);
             #[cfg(feature = "system_logger")]
             {
                 if logging::get_resource_unlock() {
