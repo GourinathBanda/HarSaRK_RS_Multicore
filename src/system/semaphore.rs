@@ -46,7 +46,8 @@ impl Semaphore {
                     logging::report(LogEventType::SemaphoreSignal(*flags, self.tasks));
                 }
             }
-        })
+        });
+        schedule(self.task_manager);
     }
 
     /// Checks if the flag was enabled for the currently running task.

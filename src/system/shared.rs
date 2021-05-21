@@ -53,9 +53,9 @@ impl<'a, T: Sized> Shared<'a, T> {
                 {
                     let oc_crr_tid = self.other_core_task_manager.borrow(cs_token).borrow().curr_tid;
 
-                    hprintln!("spin: oc={:b}, oc_taskmask={:b}, res={}", 1 << oc_crr_tid as u32 , self.other_resource_taskmask, oc_crr_tid as u32 & self.other_resource_taskmask);
+                    hprintln!("spin: curr_tid={}, oc={:b}, oc_taskmask={:b}, res={}", oc_crr_tid, 1 << oc_crr_tid as u32 , self.other_resource_taskmask, oc_crr_tid as u32 & self.other_resource_taskmask);
                     if ((1 << oc_crr_tid as u32) & self.other_resource_taskmask) == 0 {
-                        // hprintln!("migration set: oc={:b}, oc_taskmask={:b}, res={}", oc_crr_tid as u32, self.other_resource_taskmask, oc_crr_tid as u32 & self.other_resource_taskmask);
+                        hprintln!("migration set: oc={:b}, oc_taskmask={:b}, res={}", oc_crr_tid as u32, self.other_resource_taskmask, oc_crr_tid as u32 & self.other_resource_taskmask);
                         // this means that the task executing on the other core is not the one that
                         // locked the resource. in other words, the resource that has locked the
                         // resource has been preempted.
@@ -67,9 +67,11 @@ impl<'a, T: Sized> Shared<'a, T> {
                         handler.migrated_tid = migrated_tid;
                     }
                     spinunlock(&TASKMANAGER_LOCK);
-                    schedule(self.resource.task_manager);
                 }
             });
+            // XXX: this cannot be inside the if because schedule cannot be called before
+            // unlocking the lock
+            schedule(self.resource.task_manager);
 
         }
         critical_section(|cs_token| {

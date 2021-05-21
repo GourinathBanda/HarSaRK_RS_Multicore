@@ -8,8 +8,9 @@ use crate::priv_execute;
 use crate::system::scheduler::*;
 use crate::utils::arch::is_privileged;
 use crate::utils::arch::{critical_section, set_pendsv, svc_call, Mutex};
-use crate::system::spinlock::{spinlock, spinlock_try, spinunlock, TASKMANAGER_LOCK};
+use crate::system::spinlock::{spinlock, spinunlock, TASKMANAGER_LOCK};
 use crate::KernelError;
+use cortex_m_semihosting::hprintln;
 
 #[cfg(feature = "system_logger")]
 use crate::kernel::logging;
@@ -94,13 +95,19 @@ pub fn schedule(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     }
 }
 
+#[inline(never)]
 fn preempt() {
     set_pendsv();
 }
 
 /// Returns the TaskId of the currently running task in the kernel.
 pub fn get_curr_tid(task_manager: &'static Mutex<RefCell<Scheduler>>) -> TaskId {
-    critical_section(|cs_token| task_manager.borrow(cs_token).borrow().curr_tid as TaskId)
+    critical_section(|cs_token| {
+        spinlock(&TASKMANAGER_LOCK);
+        let tid = task_manager.borrow(cs_token).borrow().curr_tid as TaskId;
+        spinunlock(&TASKMANAGER_LOCK);
+        tid
+    })
 }
 
 /// The Kernel blocks the tasks mentioned in `tasks_mask`.
@@ -165,30 +172,37 @@ pub fn release(task_manager: &'static Mutex<RefCell<Scheduler>>, tasks_mask: Boo
         }
     }
     critical_section(|cs_token| {
+        spinlock(&TASKMANAGER_LOCK);
         task_manager
             .borrow(cs_token)
             .borrow_mut()
-            .release(tasks_mask)
+            .release(tasks_mask);
+        spinunlock(&TASKMANAGER_LOCK);
     });
-    schedule(task_manager);
+    // TODO: not sure if this needs to enabled or not?
+    // schedule(task_manager);
 }
 
 /// Enable preemptive scheduling
 pub fn enable_preemption(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     critical_section(|cs_token| {
+        spinlock(&TASKMANAGER_LOCK);
         let handler = &mut task_manager.borrow(cs_token).borrow_mut();
         handler.preempt_disable_count -= 1;
         if handler.preempt_disable_count == 0 {
             handler.is_preemptive = true;
         }
+        spinunlock(&TASKMANAGER_LOCK);
     })
 }
 
 /// Disable preemptive scheduling
 pub fn disable_preemption(task_manager: &'static Mutex<RefCell<Scheduler>>) {
     critical_section(|cs_token| {
+        spinlock(&TASKMANAGER_LOCK);
         let handler = &mut task_manager.borrow(cs_token).borrow_mut();
         handler.preempt_disable_count += 1;
         handler.is_preemptive = false;
+        spinunlock(&TASKMANAGER_LOCK);
     })
 }

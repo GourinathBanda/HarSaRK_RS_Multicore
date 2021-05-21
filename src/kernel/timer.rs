@@ -2,7 +2,6 @@
 use core::cell::RefCell;
 
 use crate::priv_execute;
-use crate::system::scheduler::*;
 use crate::utils::arch::is_privileged;
 use crate::utils::arch::{critical_section, svc_call, Mutex, Peripherals, SystClkSource};
 use crate::KernelError;

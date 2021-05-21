@@ -3,10 +3,12 @@
 //! Defines functions which are defined majorly in assembly. Thus, might change for one board to another.
 
 // Platform specific Exports
-pub use cortex_m::interrupt::free as critical_section;
-pub use cortex_m::interrupt::Mutex;
+// pub use cortex_m::interrupt::free as critical_section;
+pub use cortex_m::interrupt::{Mutex, CriticalSection, disable, enable};
 pub use cortex_m::peripheral::syst::SystClkSource;
 pub use cortex_m::peripheral::Peripherals;
+use crate::system::scheduler::*;
+use core::cell::RefCell;
 
 use cortex_m::register::control;
 use cortex_m_rt::exception;
@@ -24,6 +26,33 @@ use crate::kernel::task_monitor::sweep_deadlines;
 
 #[cfg(feature = "timer")]
 use crate::kernel::timer::update_time;
+
+#[inline(never)]
+unsafe fn enable_noinline(){
+    enable();
+}
+
+/// this is replication of critical_section from cortex_m crate
+#[inline]
+pub fn critical_section<F, R>(f: F) -> R
+where
+    F: FnOnce(&CriticalSection) -> R,
+{
+    let primask = cortex_m::register::primask::read();
+
+    // disable interrupts
+    disable();
+
+    let r = f(unsafe { &CriticalSection::new() });
+
+    // If the interrupts were active before our `disable` call, then re-enable
+    // them. Otherwise, keep them disabled
+    if primask.is_active() {
+        unsafe { enable_noinline() }
+    }
+
+    r
+}
 
 /// Returns the MSB of `val`. It is written using CLZ instruction.
 pub fn get_msb(val: u32) -> Option<usize> {
@@ -68,12 +97,12 @@ pub fn save_context(task_stack: &TaskControlBlock) {
             "mrs r0, psp",
             "subs r0, #16",
             "stmia r0!,{{r4-r7}}",
-            "mov	r4, r8",
-            "mov	r5, r9",
-            "mov	r6, r10",
-            "mov	r7, r11",
+            // "mov	r4, r8",
+            // "mov	r5, r9",
+            // "mov	r6, r10",
+            // "mov	r7, r11",
             "subs	r0, #32",
-            "stmia	r0!,{{r4-r7}}",
+            "stmia	r0!,{{r8-r11}}",
             "subs	r0, #16",
             "mov	r1, {0}",
             "@ldr	r1, [r2]",
@@ -81,6 +110,9 @@ pub fn save_context(task_stack: &TaskControlBlock) {
             in(reg) task_stack,
             out("r0") _,
             out("r1") _,
+            // out("r3") _,
+            // out("r4") _,
+            // out("r5") _,
         )
     };
 }
@@ -170,48 +202,100 @@ pub extern "C" fn SVCall_1() {
 //     unsafe { return_to_psp() }
 // }
 
+#[inline(never)]
+fn get_next_tcb(t1: &'static Mutex<RefCell<Scheduler>>, t2: &'static Mutex<RefCell<Scheduler>>, cs_token: &CriticalSection) -> Option<TaskControlBlock>{
+    let handler = &mut t1.borrow(cs_token).borrow_mut();
+    let curr_tid: usize = handler.curr_tid;
+    if handler.migrated_tid > 0 {
+        let mut oc_handler = &mut t2.borrow(cs_token).borrow_mut();
+        if handler.running_migrated {
+            // the migration has already been done and schedule was called during resource
+            // unlock
+            hprintln!("unmigrating task");
+            let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
+            migrate_task.save_context();
+            oc_handler.migrated_tasks = oc_handler.migrated_tasks & !(1 << handler.migrated_tid as u32);
+            handler.migrated_tid = 0;
+            handler.running_migrated = false;
+            let curr_task = handler.task_control_blocks[curr_tid];
+            return curr_task;
+        } else {
+            hprintln!("migrating task");
+            // the tid to be migrated but migration has not occured
+            let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+            curr_task.save_context();
+            handler.running_migrated = true;
+            let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid];
+            return migrate_task;
+        }
+    } else {
+        let next_tid: usize = handler.get_next_tid() as usize;
+        if curr_tid != next_tid || (!handler.started) {
+            if handler.started {
+                let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+                curr_task.save_context();
+            } else {
+                handler.started = true;
+            }
+            handler.curr_tid = next_tid;
+            let next_tcb = handler.task_control_blocks[next_tid];
+            return next_tcb;
+        }
+    }
+    None
+}
+
 #[export_name = "PendSV_0"]
 pub extern "C" fn PendSV_0() {
     critical_section(|cs_token| {
         spinlock(&TASKMANAGER_LOCK);
-        let handler = &mut TaskManager.borrow(cs_token).borrow_mut();
-        let curr_tid: usize = handler.curr_tid;
-        if handler.migrated_tid > 0 {
-            let mut oc_handler = &mut TaskManager_C1.borrow(cs_token).borrow_mut();
-            if handler.running_migrated {
-                // the migration has already been done and schedule was called during resource
-                // unlock
-                hprintln!("unmigrating task");
-                let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
-                migrate_task.save_context();
-                oc_handler.migrated_tasks = oc_handler.migrated_tasks & !(1 << handler.migrated_tid as u32);
-                let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
-                curr_task.load_context();
-                handler.migrated_tid = 0;
-                handler.running_migrated = false;
-            } else {
-                hprintln!("migrating task");
-                // the tid to be migrated but migration has not occured
-                let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
-                curr_task.save_context();
-                let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
-                migrate_task.load_context();
-                handler.running_migrated = true;
-            }
-        } else {
-            let next_tid: usize = handler.get_next_tid() as usize;
-            if curr_tid != next_tid || (!handler.started) {
-                if handler.started {
-                    let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
-                    curr_task.save_context();
-                } else {
-                    handler.started = true;
-                }
-                let next_task = handler.task_control_blocks[next_tid].as_ref().unwrap();
-                next_task.load_context();
-
-                handler.curr_tid = next_tid;
-            }
+        // if false {
+        //     let handler = &mut TaskManager.borrow(cs_token).borrow_mut();
+        //     let curr_tid: usize = handler.curr_tid;
+        //     if handler.migrated_tid > 0 {
+        //         let mut oc_handler = &mut TaskManager_C1.borrow(cs_token).borrow_mut();
+        //         if handler.running_migrated {
+        //             // the migration has already been done and schedule was called during resource
+        //             // unlock
+        //             hprintln!("unmigrating task");
+        //             let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
+        //             migrate_task.save_context();
+        //             oc_handler.migrated_tasks = oc_handler.migrated_tasks & !(1 << handler.migrated_tid as u32);
+        //             let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+        //             curr_task.load_context();
+        //             handler.migrated_tid = 0;
+        //             handler.running_migrated = false;
+        //         } else {
+        //             hprintln!("migrating task");
+        //             // the tid to be migrated but migration has not occured
+        //             let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+        //             curr_task.save_context();
+        //             let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
+        //             migrate_task.load_context();
+        //             handler.running_migrated = true;
+        //         }
+        //     } else {
+        //         let next_tid: usize = handler.get_next_tid() as usize;
+        //         if curr_tid != next_tid || (!handler.started) {
+        //             if handler.started {
+        //                 let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+        //                 curr_task.save_context();
+        //             } else {
+        //                 handler.started = true;
+        //             }
+        //             handler.curr_tid = next_tid;
+        //             let next_task = handler.task_control_blocks[next_tid].as_ref().unwrap();
+        //             // next_task.load_context();
+        //
+        //         }
+        //     }
+        // }
+        // let next_task = {
+        //     let handler = TaskManager.borrow(cs_token).borrow();
+        //     handler.task_control_blocks[handler.curr_tid]
+        // };
+        if let Some(ref next_task) = get_next_tcb(&TaskManager, &TaskManager_C1, cs_token) {
+            next_task.load_context();
         }
         spinunlock(&TASKMANAGER_LOCK);
     });
@@ -222,48 +306,58 @@ pub extern "C" fn PendSV_0() {
 pub extern "C" fn PendSV_1() {
     critical_section(|cs_token| {
         spinlock(&TASKMANAGER_LOCK);
-        let handler = &mut TaskManager_C1.borrow(cs_token).borrow_mut();
-        let curr_tid: usize = handler.curr_tid;
-        if handler.migrated_tid > 0 {
-            let mut oc_handler = &mut TaskManager.borrow(cs_token).borrow_mut();
-            if handler.running_migrated {
-                // the migration has already been done and schedule was called during resource
-                // unlock
-                let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
-                migrate_task.save_context();
-                oc_handler.migrated_tasks = oc_handler.migrated_tasks & !(1 << handler.migrated_tid as u32);
-                let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
-                curr_task.load_context();
-            } else {
-                // the tid to be migrated but migration has not occured
-                let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
-                curr_task.save_context();
-                let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
-                migrate_task.load_context();
-            }
-        } else {
-            let next_tid: usize = handler.get_next_tid() as usize;
-            if curr_tid != next_tid || (!handler.started) {
-                if handler.started {
-                    let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
-                    curr_task.save_context();
-                } else {
-                    handler.started = true;
-                }
-                let next_task = handler.task_control_blocks[next_tid].as_ref().unwrap();
-                next_task.load_context();
+        // let handler = &mut TaskManager_C1.borrow(cs_token).borrow_mut();
+        // let curr_tid: usize = handler.curr_tid;
+        // if handler.migrated_tid > 0 {
+        //     let mut oc_handler = &mut TaskManager.borrow(cs_token).borrow_mut();
+        //     if handler.running_migrated {
+        //         // the migration has already been done and schedule was called during resource
+        //         // unlock
+        //         let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
+        //         migrate_task.save_context();
+        //         oc_handler.migrated_tasks = oc_handler.migrated_tasks & !(1 << handler.migrated_tid as u32);
+        //         handler.migrated_tid = 0;
+        //         handler.running_migrated = false;
+        //         let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+        //         curr_task.load_context();
+        //     } else {
+        //         // the tid to be migrated but migration has not occured
+        //         let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+        //         curr_task.save_context();
+        //         handler.running_migrated = true;
+        //         let migrate_task = oc_handler.task_control_blocks[handler.migrated_tid].as_ref().unwrap();
+        //         migrate_task.load_context();
+        //     }
+        // } else {
+        //     let next_tid: usize = handler.get_next_tid() as usize;
+        //     if curr_tid != next_tid || (!handler.started) {
+        //         if handler.started {
+        //             let curr_task = handler.task_control_blocks[curr_tid].as_ref().unwrap();
+        //             curr_task.save_context();
+        //         } else {
+        //             handler.started = true;
+        //         }
+        //         handler.curr_tid = next_tid;
+        //         let next_task = handler.task_control_blocks[next_tid].as_ref().unwrap();
+        //         next_task.load_context();
+        //     }
+        // }
 
-                handler.curr_tid = next_tid;
-            }
+        if let Some(ref next_task) = get_next_tcb(&TaskManager_C1, &TaskManager, cs_token) {
+            next_task.load_context();
         }
-
         spinunlock(&TASKMANAGER_LOCK);
     });
     unsafe { return_to_psp() }
 }
 
 pub fn set_pendsv() {
+    // XXX TODO
+    // this enable is required because something something is disabling the interrupts, needs
+    // investigation to find out who is disabling it
+    unsafe {enable()};
     cortex_m::peripheral::SCB::set_pendsv();
+    // unsafe {asm!("isb")};
 }
 
 pub fn wait_for_interrupt() {

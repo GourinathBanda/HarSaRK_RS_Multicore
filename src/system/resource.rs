@@ -7,6 +7,7 @@ use crate::kernel::tasks::{block_tasks, get_curr_tid, schedule, unblock_tasks};
 use crate::system::pi_stack::PiStack;
 use crate::system::scheduler::{BooleanVector, Scheduler, TaskId};
 use crate::utils::arch::{critical_section, Mutex};
+use crate::system::spinlock::{spinlock, spinlock_try, spinunlock, TASKMANAGER_LOCK};
 use crate::utils::helpers::get_msb_const;
 use crate::KernelError;
 use cortex_m_semihosting::hprintln;
@@ -89,8 +90,11 @@ impl<T: Sized> Resource<T> {
                 // gives the task mask which are the tasks which will be blocked by calling this
                 // specific lock. we use this mask to be unlock the tasks which are blocked by the
                 // lock of this resource.
+
+                spinlock(&TASKMANAGER_LOCK);
                 *self.blocked_mask.borrow_mut() =
                     self.tasks_mask & !self.task_manager.borrow(cs_token).borrow().blocked_tasks;
+                spinunlock(&TASKMANAGER_LOCK);
                 block_tasks(self.task_manager, !(1 << curr_tid) & self.tasks_mask);
                 #[cfg(feature = "system_logger")]
                 {
@@ -100,11 +104,11 @@ impl<T: Sized> Resource<T> {
                 }
                 return Ok(&self.inner);
             }
-            hprintln!(
-                "lol here ceiling={}, system_ceiling={}",
-                ceiling,
-                pi_stack.system_ceiling
-            );
+            // hprintln!(
+            //     "lol here ceiling={}, system_ceiling={}",
+            //     ceiling,
+            //     pi_stack.system_ceiling
+            // );
             return Err(KernelError::AccessDenied);
         })
     }
@@ -112,12 +116,10 @@ impl<T: Sized> Resource<T> {
     /// Unlocks the Resource and unblocks the tasks which were blocked during the call to lock
     pub(crate) fn unlock(&self) -> Result<(), KernelError> {
         critical_section(|cs_token| {
-            let pi_stack = &mut PiStackGlobal.borrow(cs_token).borrow_mut();
+            let pi_stack = &mut self.pi_stack.borrow(cs_token).borrow_mut();
             if self.ceiling as i32 == pi_stack.system_ceiling {
-                pi_stack.pop_stack()?;
+                pi_stack.pop_stack().unwrap();
             }
-            unblock_tasks(self.task_manager, *self.blocked_mask.borrow());
-            schedule(self.task_manager);
             #[cfg(feature = "system_logger")]
             {
                 if logging::get_resource_unlock() {
@@ -126,8 +128,10 @@ impl<T: Sized> Resource<T> {
                     ));
                 }
             }
-            Ok(())
-        })
+        });
+        unblock_tasks(self.task_manager, *self.blocked_mask.borrow());
+        schedule(self.task_manager);
+        Ok(())
     }
     /// A helper function that ensures that if a resource is locked, it is unlocked.
     pub fn acquire<F, R>(&self, handler: F) -> Result<R, KernelError>
